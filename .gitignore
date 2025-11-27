@@ -1,0 +1,20 @@
+# Python
+.venv/
+.conda/
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment variables (API keys)
+.env
+
+# Output folders
+output/
+
+# IDE
+.vscode/
+.idea/
+
+# OS
+.DS_Store
+Thumbs.db

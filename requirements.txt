@@ -1,0 +1,11 @@
+# Core dependencies
+requests>=2.25.0
+beautifulsoup4>=4.9.0
+pydantic>=2.0.0
+
+# LLM classification (optional - set OPENAI_API_KEY to use)
+openai>=1.0.0
+
+# Playwright for JS-heavy sites (optional)
+# Uncomment and run: pip install playwright && playwright install chromium
+# playwright>=1.40.0
