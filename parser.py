@@ -126,11 +126,36 @@ def extract_title(soup: BeautifulSoup) -> Optional[str]:
     return None
 
 
+def extract_playwright_visible_text(html: str) -> Optional[str]:
+    """Extract visible text captured by Playwright if present"""
+    import re
+    match = re.search(
+        r'<!--PLAYWRIGHT_VISIBLE_TEXT_START-->(.+?)<!--PLAYWRIGHT_VISIBLE_TEXT_END-->',
+        html,
+        re.DOTALL
+    )
+    if match:
+        return match.group(1).strip()
+    return None
+
+
 def parse_html(html: str, url: str, brand: str) -> ParsedContent:
     """
     Main parsing function.
     Takes raw HTML and returns structured ParsedContent.
     """
+    # Check for Playwright-captured visible text first
+    playwright_text = extract_playwright_visible_text(html)
+    
+    # Remove the visible text marker before parsing HTML
+    if playwright_text:
+        html = re.sub(
+            r'<!--PLAYWRIGHT_VISIBLE_TEXT_START-->.+?<!--PLAYWRIGHT_VISIBLE_TEXT_END-->',
+            '',
+            html,
+            flags=re.DOTALL
+        )
+    
     soup = BeautifulSoup(html, "html.parser")
     
     # Extract metadata before cleaning
@@ -155,21 +180,34 @@ def parse_html(html: str, url: str, brand: str) -> ParsedContent:
     if meta_description:
         full_text_parts.append(f"Description: {meta_description}")
     
-    full_text_parts.append("\n--- HEADINGS ---")
-    full_text_parts.extend(headings)
-    
-    full_text_parts.append("\n--- CONTENT ---")
-    full_text_parts.extend(paragraphs[:50])  # Limit to avoid huge prompts
-    
-    full_text_parts.append("\n--- LIST ITEMS ---")
-    full_text_parts.extend(list_items[:100])  # Limit
-    
-    if tables:
-        full_text_parts.append("\n--- TABLES ---")
-        for i, table in enumerate(tables[:5]):  # Limit to 5 tables
-            full_text_parts.append(f"Table {i+1}:")
-            for row in table[:20]:  # Limit rows
-                full_text_parts.append(" | ".join(row))
+    # If we have Playwright-captured visible text, use it as primary content
+    # This is MUCH cleaner than parsing CSS-heavy HTML
+    if playwright_text:
+        full_text_parts.append("\n--- PAGE CONTENT (RENDERED) ---")
+        # Clean up the visible text - remove excessive whitespace
+        cleaned_visible = re.sub(r'\n{3,}', '\n\n', playwright_text)
+        cleaned_visible = re.sub(r' {2,}', ' ', cleaned_visible)
+        # Limit to reasonable size for LLM (increased to 25k to capture full loyalty terms)
+        if len(cleaned_visible) > 25000:
+            cleaned_visible = cleaned_visible[:25000] + "\n... [truncated]"
+        full_text_parts.append(cleaned_visible)
+    else:
+        # Fall back to traditional HTML parsing
+        full_text_parts.append("\n--- HEADINGS ---")
+        full_text_parts.extend(headings)
+        
+        full_text_parts.append("\n--- CONTENT ---")
+        full_text_parts.extend(paragraphs[:50])  # Limit to avoid huge prompts
+        
+        full_text_parts.append("\n--- LIST ITEMS ---")
+        full_text_parts.extend(list_items[:100])  # Limit
+        
+        if tables:
+            full_text_parts.append("\n--- TABLES ---")
+            for i, table in enumerate(tables[:5]):  # Limit to 5 tables
+                full_text_parts.append(f"Table {i+1}:")
+                for row in table[:20]:  # Limit rows
+                    full_text_parts.append(" | ".join(row))
     
     full_text = "\n".join(full_text_parts)
     

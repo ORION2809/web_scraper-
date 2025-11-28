@@ -14,68 +14,124 @@ from schemas import ParsedContent, LoyaltyProgram
 # STRICT: No hallucination - only extract what is explicitly stated
 SYSTEM_PROMPT = """You are an expert at extracting structured loyalty program information from web page content.
 
-CRITICAL RULES:
+## CRITICAL ANTI-HALLUCINATION RULES:
 1. ONLY extract information that is EXPLICITLY stated in the source text
-2. DO NOT invent tier names like "Green" or "Gold" unless they are explicitly mentioned
-3. DO NOT infer point ranges or thresholds that aren't stated
-4. Extract exact values as written in the source
-5. If something is not mentioned, use null or empty arrays
+2. DO NOT invent or infer ANY values not directly stated
+3. If something is not mentioned, use null or empty arrays - NEVER guess
+4. Quote exact text from source when possible
+5. When in doubt, leave it empty
 
-KEY DISTINCTIONS:
-- "Redemption levels" (e.g., "25 Stars for X, 100 Stars for Y") should go in catalog_products, NOT tiers
-- "Membership tiers" (e.g., "Bronze", "Silver", "Gold") should go in tiers ONLY if explicitly named as membership levels
-- Extract earning rates exactly as stated (e.g., "2 Stars per $1")
+## EXTRACTION GUIDE:
 
-Extract the following (ONLY if explicitly stated):
-1. **Program Name**: Exact official name
-2. **Description**: Exact description from source
-3. **Strategy**: Industry type, program type, channels mentioned
-4. **Tiers**: ONLY if page explicitly names membership tier levels
-5. **Rewards/Redemption**: 
-   - Points earning rate (exact as stated)
-   - Catalog products: Items available for redemption with their point costs
-   - Gift cards if mentioned
-   - Badges/achievements if mentioned
-6. **Incentives**: Special offers, birthday rewards, bonuses mentioned
+### programName
+- The official name of the loyalty program (e.g., "Starbucks Rewards", "MyMcDonald's Rewards")
+- Must be explicitly stated on the page
 
-Return valid JSON:
+### description  
+- The official program description or tagline
+- Use exact text from the source
+
+### strategy.industry
+- The business category (e.g., "Quick Service Restaurant", "Coffee", "Fast Food")
+- Infer from brand context if obvious (Starbucks = Coffee)
+
+### strategy.programType
+- Usually "B2C Customer Loyalty" for consumer programs
+- Could be "Membership", "Subscription" if stated
+
+### strategy.goals
+- Business objectives like "Increase purchase frequency", "Improve retention"
+- ONLY if explicitly stated or clearly implied
+
+### strategy.behaviors
+- Actions customers can take: "Purchases", "App usage", "Referrals", "Social sharing", "Reviews"
+- ONLY include if the program explicitly rewards these behaviors
+
+### strategy.audience
+- Target customer segments mentioned: "Frequent visitors", "Mobile app users", "New customers"
+- ONLY if explicitly described
+
+### strategy.channels
+- How customers interact: "Mobile app", "Website", "In-store POS", "Email"
+- Include channels explicitly mentioned
+
+### design.segments
+- Named customer segments with criteria (e.g., "Gold Members: 5000+ points annually")
+- Include approx_users ONLY if stated
+- MOST programs don't explicitly define segments - leave empty if not stated
+
+### design.tiers
+- ONLY membership tier levels explicitly named (e.g., "Bronze", "Silver", "Gold", "Platinum")
+- Each tier needs: name, range (point threshold), multiplierText (earning multiplier), benefits
+- DO NOT confuse redemption levels (25 Stars, 100 Stars) with membership tiers
+- If no tiers are explicitly named, leave empty
+
+### design.incentives
+- Promotional campaigns and special offers
+- Examples: "Birthday Reward", "Referral Bonus", "Double Points Days", "Welcome Offer", "Free Refills"
+- Include name and description
+- IMPORTANT: Extract ALL benefits and special offers mentioned
+
+### design.rewards.loyalty_points
+- The earning rate: "1 point per $1", "2 Stars per $1", "10 points per $1"
+- Extract EXACTLY as stated
+
+### design.rewards.achievement_badges
+- Gamification badges/achievements with Name, Criteria, and Reward
+- Examples: "First Purchase Badge - Complete first order - 50 bonus points"
+- ONLY if explicitly mentioned
+
+### design.rewards.gift_cards
+- Gift card redemption options with Name (value), redemption_points, validity_days
+- ONLY if explicitly listed
+
+### design.rewards.catalog_products
+- Items available for point redemption
+- Name: exact item name or category
+- point_cost: exact point cost as stated
+- IMPORTANT: Extract ALL redemption tiers mentioned (e.g., 25 Stars, 100 Stars, 200 Stars, 300 Stars, 400 Stars)
+- Include ALL items at each tier level
+- This is where redemption items go (NOT membership tiers)
+
+## OUTPUT FORMAT:
+Return valid JSON matching this exact structure:
 {
-  "programName": "string or null - exact name",
-  "description": "string or null - exact description",
+  "programName": "string or null",
+  "description": "string or null",
   "strategy": {
     "industry": "string or null",
     "programType": "string or null",
-    "goals": [],
-    "behaviors": [],
-    "audience": [],
-    "channels": ["string - channels mentioned like 'Mobile app', 'Website', 'In-store'"]
+    "goals": ["string array - only if stated"],
+    "behaviors": ["string array - only if rewarded"],
+    "audience": ["string array - only if stated"],
+    "channels": ["string array - only if mentioned"]
   },
   "design": {
-    "segments": [],
-    "tiers": [],
+    "segments": [
+      {"name": "string", "criteria": "string", "approx_users": number_or_null}
+    ],
+    "tiers": [
+      {"name": "string", "range": "string", "multiplierText": "string", "benefits": ["string"]}
+    ],
     "incentives": [
-      {
-        "name": "string - e.g., 'Birthday Reward'",
-        "description": "string - exact description"
-      }
+      {"name": "string", "description": "string or null"}
     ],
     "rewards": {
-      "loyalty_points": {
-        "points_per_dollar": "string - exact earning rate e.g., '2 Stars per $1'"
-      },
-      "achievement_badges": [],
-      "gift_cards": [],
+      "loyalty_points": {"points_per_dollar": "string or null"},
+      "achievement_badges": [
+        {"Name": "string", "Criteria": "string", "Reward": "string"}
+      ],
+      "gift_cards": [
+        {"Name": "string", "redemption_points": "string", "validity_days": "string"}
+      ],
       "catalog_products": [
-        {
-          "Name": "string - redemption item name",
-          "point_cost": "string - e.g., '25 Stars', '100 Stars'"
-        }
+        {"Name": "string", "point_cost": "string"}
       ]
     }
   }
 }
 
-Extract what IS there. Leave empty what ISN'T there. Do not invent."""
+REMEMBER: Extract only what IS there. Leave empty what ISN'T. Never invent."""
 
 
 def classify_with_openai(parsed: ParsedContent, model: str = "gpt-4o-mini") -> Optional[dict]:
@@ -92,8 +148,8 @@ def classify_with_openai(parsed: ParsedContent, model: str = "gpt-4o-mini") -> O
         import openai
         client = openai.OpenAI(api_key=api_key)
         
-        # Truncate full_text if too long (keep under ~12k tokens)
-        text = parsed.full_text[:15000]
+        # Truncate full_text if too long (keep under ~20k tokens, ~25k chars)
+        text = parsed.full_text[:25000]
         
         user_prompt = f"""Extract loyalty program information from this {parsed.brand} webpage:
 

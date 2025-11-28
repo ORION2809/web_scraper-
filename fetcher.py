@@ -124,6 +124,7 @@ def fetch_with_playwright(url: str, timeout: int = 30000) -> FetchResult:
     """
     Fetch URL using Playwright for JS-rendered content.
     Requires: pip install playwright && playwright install chromium
+    Returns both raw HTML and extracted visible text for better LLM processing.
     """
     start_time = time.time()
     
@@ -139,12 +140,28 @@ def fetch_with_playwright(url: str, timeout: int = 30000) -> FetchResult:
             page = context.new_page()
             
             response = page.goto(url, wait_until="networkidle", timeout=timeout)
+            
+            # Wait a bit more for dynamic content to load
+            page.wait_for_timeout(2000)
+            
+            # Get both raw HTML and visible text
             html = page.content()
+            
+            # Extract visible text content (much cleaner for LLM)
+            try:
+                visible_text = page.inner_text('body')
+            except:
+                visible_text = ""
+            
             status_code = response.status if response else None
             
             browser.close()
             
             fetch_time_ms = int((time.time() - start_time) * 1000)
+            
+            # Embed the visible text in a special marker for the parser
+            if visible_text:
+                html = f"<!--PLAYWRIGHT_VISIBLE_TEXT_START-->{visible_text}<!--PLAYWRIGHT_VISIBLE_TEXT_END-->" + html
             
             return FetchResult(
                 url=url,
